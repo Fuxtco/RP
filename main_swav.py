@@ -35,6 +35,7 @@ import src.resnet50 as resnet_models
 
 logger = getLogger()
 
+## 定义一个命令行参数解析器，这个脚本的所有超参数都通过它来管理 ##
 parser = argparse.ArgumentParser(description="Implementation of SwAV")
 
 #########################
@@ -136,6 +137,8 @@ def main():
         args.max_scale_crops,
     )
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    
+    # DataLoader自动调用train_dataset[i]
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         sampler=sampler,

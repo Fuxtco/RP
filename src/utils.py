@@ -43,10 +43,13 @@ def init_distributed_mode(args):
         - rank
     """
 
+    # HPC超算最常见的任务调度系统
     args.is_slurm_job = "SLURM_JOB_ID" in os.environ
 
     if args.is_slurm_job:
+        # SLURM分配的全局进程ID
         args.rank = int(os.environ["SLURM_PROCID"])
+        # 集群使用了多少节点，每个节点多少任务
         args.world_size = int(os.environ["SLURM_NNODES"]) * int(
             os.environ["SLURM_TASKS_PER_NODE"][0]
         )
@@ -58,8 +61,8 @@ def init_distributed_mode(args):
 
     # prepare distributed
     dist.init_process_group(
-        backend="nccl",
-        init_method=args.dist_url,
+        backend="nccl", #NVIDIA GPU 最快的通信后端
+        init_method=args.dist_url, #进程同步方式
         world_size=args.world_size,
         rank=args.rank,
     )
@@ -113,7 +116,7 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
     # look for a checkpoint in exp repository
     if isinstance(ckp_paths, list):
         for ckp_path in ckp_paths:
-            if os.path.isfile(ckp_path):
+            if os.path.isfile(ckp_path): #找到第一个存在的路径
                 break
     else:
         ckp_path = ckp_paths
@@ -134,9 +137,11 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:
             try:
+                # strict表示checkpoint的key和model的key必须完全匹配
                 msg = value.load_state_dict(checkpoint[key], strict=False)
                 print(msg)
             except TypeError:
+                # 例如prototype可能数据不一致；初始epochs不一定启用了queue...
                 msg = value.load_state_dict(checkpoint[key])
             logger.info("=> loaded {} from checkpoint '{}'".format(key, ckp_path))
         else:
@@ -144,7 +149,8 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
                 "=> failed to load {} from checkpoint '{}'".format(key, ckp_path)
             )
 
-    # re load variable important for the run
+    # reload variable important for the run
+    # 恢复非模型参数变量，比如当前epoch,iteration等
     if run_variables is not None:
         for var_name in run_variables:
             if var_name in checkpoint:
@@ -181,16 +187,17 @@ class AverageMeter(object):
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
+    with torch.no_grad(): #禁用梯度
         maxk = max(topk)
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
+        pred = pred.t() #转置，方便比较
+        correct = pred.eq(target.view(1, -1).expand_as(pred)) #1或0表明预测是否正确
 
         res = []
         for k in topk:
+            # 拉平得到前top k的正确率，因为每个分类都只会有一个所以可以直接求和
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
