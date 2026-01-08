@@ -50,9 +50,12 @@ def init_distributed_mode(args):
         # SLURM分配的全局进程ID
         args.rank = int(os.environ["SLURM_PROCID"])
         # 集群使用了多少节点，每个节点多少任务
+        args.world_size = int(os.environ["SLURM_NTASKS"])
+        '''
+        这里网端没改动
         args.world_size = int(os.environ["SLURM_NNODES"]) * int(
             os.environ["SLURM_TASKS_PER_NODE"][0]
-        )
+        )'''
     else:
         # multi-GPU job (local or multi-node) - jobs started with torch.distributed.launch
         # read environment variables
@@ -67,9 +70,23 @@ def init_distributed_mode(args):
         rank=args.rank,
     )
 
+    '''
     # set cuda device
+    这里网端没改动
     args.gpu_to_work_on = args.rank % torch.cuda.device_count()
     torch.cuda.set_device(args.gpu_to_work_on)
+    '''
+    
+    # set cuda device
+    if args.is_slurm_job and "SLURM_LOCALID" in os.environ:
+        args.gpu_to_work_on = int(os.environ["SLURM_LOCALID"])
+    elif "LOCAL_RANK" in os.environ:
+        args.gpu_to_work_on = int(os.environ["LOCAL_RANK"])
+    else:
+        args.gpu_to_work_on = args.rank % torch.cuda.device_count()
+
+    torch.cuda.set_device(args.gpu_to_work_on)
+    
     return
 
 
@@ -188,7 +205,8 @@ class AverageMeter(object):
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad(): #禁用梯度
-        maxk = max(topk)
+        # maxk = max(topk)， test30只有3类
+        maxk = min(max(topk), output.size(1))
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
@@ -197,7 +215,8 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
+            k_eff = min(k, maxk)
             # 拉平得到前top k的正确率，因为每个分类都只会有一个所以可以直接求和
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k_eff].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res

@@ -25,11 +25,7 @@ import apex
 from apex.parallel.LARC import LARC
 '''
 from src.larc import LARC
-from torch.amp import GradScaler, autocast
-'''
-还是用这个环境不支持
 from torch.cuda.amp import GradScaler, autocast
-'''
 
 from src.utils import (
     bool_flag,
@@ -74,8 +70,7 @@ parser.add_argument("--sinkhorn_iterations", default=3, type=int,
                     help="number of iterations in Sinkhorn-Knopp algorithm")
 parser.add_argument("--feat_dim", default=128, type=int,
                     help="feature dimension")
-##prototypes设置100
-parser.add_argument("--nmb_prototypes", default=3000, type=int,
+parser.add_argument("--nmb_prototypes", default=100, type=int,
                     help="number of prototypes")
 parser.add_argument("--queue_length", type=int, default=0,
                     help="length of the queue (0 for no queue)")
@@ -85,14 +80,6 @@ parser.add_argument("--epoch_queue_starts", type=int, default=15,
 #########################
 #### optim parameters ###
 #########################
-
-## 小数据/小batch更稳
-parser.add_argument("--optimizer", default="adamw", type=str,
-                    choices=["sgd", "adamw"])
-parser.add_argument("--betas", default=[0.9, 0.999], type=float, nargs=2)
-parser.add_argument("--eps", default=1e-8, type=float)
-##
-
 parser.add_argument("--epochs", default=100, type=int,
                     help="number of total epochs to run")
 parser.add_argument("--batch_size", default=64, type=int,
@@ -242,33 +229,44 @@ def main():
         raise ValueError("Apex SyncBN is not available. Please use --sync_bn pytorch or none.")
     # copy model to GPU
     model = model.cuda()
+    
+    # ---- register a few grad hooks to locate the first module producing non-finite grads ----
+    bad_grad_first = {"name": None}
+    
+    def mark_first_bad_grad(name):
+        def _hook(grad):
+            if grad is not None and (not torch.isfinite(grad).all()) and bad_grad_first["name"] is None:
+                bad_grad_first["name"] = name
+            return grad
+        return _hook
+    
+    if args.rank == 0:
+        # conv1
+        model.conv1.weight.register_hook(mark_first_bad_grad("conv1.weight"))
+    
+        # projection head / fc (depends on your resnet50 implementation)
+        if hasattr(model, "fc") and hasattr(model.fc, "weight"):
+            model.fc.weight.register_hook(mark_first_bad_grad("fc.weight"))
+    
+        # prototypes
+        if hasattr(model, "prototypes") and hasattr(model.prototypes, "weight"):
+            model.prototypes.weight.register_hook(mark_first_bad_grad("prototypes.weight"))
+            
     if args.rank == 0:
         logger.info(model)
     logger.info("Building model done.")
 
-    # build optimizer
-    # 增加optimizer选择：
-    if args.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=args.base_lr,
-            betas=tuple(args.betas),
-            eps=args.eps,
-            weight_decay=args.wd,
-        )
-    else:
-        optimizer = torch.optim.SGD(
-            model.parameters(),
-            lr=args.base_lr,
-            momentum=0.9,
-            weight_decay=args.wd,
-        )
-        optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
-    # build lr schedule (for BOTH optimizers)
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=args.base_lr,
+        momentum=0.9,
+        weight_decay=args.wd,
+    )
+    optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
     warmup_lr_schedule = np.linspace(args.start_warmup, args.base_lr, len(train_loader) * args.warmup_epochs)
     iters = np.arange(len(train_loader) * (args.epochs - args.warmup_epochs))
     cosine_lr_schedule = np.array([args.final_lr + 0.5 * (args.base_lr - args.final_lr) * (1 + \
-                        math.cos(math.pi * t / (len(train_loader) * (args.epochs - args.warmup_epochs)))) for t in iters])
+                         math.cos(math.pi * t / (len(train_loader) * (args.epochs - args.warmup_epochs)))) for t in iters])
     lr_schedule = np.concatenate((warmup_lr_schedule, cosine_lr_schedule))
     logger.info("Building optimizer done.")
 
@@ -278,11 +276,10 @@ def main():
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level="O1")
         logger.info("Initializing mixed precision done.")
     '''
-    # (torch.cuda.amp) --> (torch.amp)
-    # scaler = GradScaler(enabled=args.use_fp16)
-    scaler = GradScaler(device_type="cuda", enabled=args.use_fp16)
+    # (torch.cuda.amp)
+    scaler = GradScaler(enabled=args.use_fp16, init_scale = 2048.0)
     if args.use_fp16:
-        logger.info("Initializing mixed precision with torch.amp done.")
+        logger.info("Initializing mixed precision with torch.cuda.amp done.")
 
     # wrap model
     model = nn.parallel.DistributedDataParallel(
@@ -356,6 +353,39 @@ def main():
 
 
 def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
+    
+    def _crop_stats(t):
+        # t: (B,C,H,W) on GPU
+        t_cpu = t.detach().float().cpu()
+        t_safe = torch.nan_to_num(t_cpu, nan=0.0, posinf=0.0, neginf=0.0)
+        finite_ratio = torch.isfinite(t_cpu).float().mean().item()
+        return {
+            "shape": tuple(t_cpu.shape),
+            "dtype": str(t.dtype),
+            "finite_ratio": finite_ratio,
+            "min": float(t_safe.min().item()),
+            "max": float(t_safe.max().item()),
+            "mean": float(t_safe.mean().item()),
+            "std": float(t_safe.std().item()),
+        }
+    
+    def _find_suspect_samples(t, absmax_thr=50.0, std_thr=1e-6):
+        # 返回：bad_nonfinite_idx, extreme_idx, constant_idx
+        B = t.shape[0]
+        t_cpu = t.detach().float().cpu()
+        finite_per_sample = torch.isfinite(t_cpu).view(B, -1).all(dim=1)
+        bad_nonfinite_idx = (~finite_per_sample).nonzero(as_tuple=True)[0].tolist()
+    
+        t_safe = torch.nan_to_num(t_cpu, nan=0.0, posinf=0.0, neginf=0.0)
+        absmax = t_safe.view(B, -1).abs().max(dim=1).values
+        extreme_idx = (absmax > absmax_thr).nonzero(as_tuple=True)[0].tolist()
+    
+        std = t_safe.view(B, -1).std(dim=1)
+        constant_idx = (std < std_thr).nonzero(as_tuple=True)[0].tolist()
+    
+        return bad_nonfinite_idx, extreme_idx, constant_idx, absmax, std
+
+    
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -369,108 +399,104 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
         data_time.update(time.time() - end)
 
         # update learning rate
-        # 算法层面，repear sampler，人为扩大epoch步数，让LR schedule更平滑，避免epoch太短导致统计不稳定，对其prototype，queue更新节奏
         iteration = epoch * len(train_loader) + it
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr_schedule[iteration]
 
-        # normalize the prototypes
-        with torch.no_grad():
-            w = model.module.prototypes.weight.data.clone()
-            w = nn.functional.normalize(w, dim=1, p=2)
-            model.module.prototypes.weight.copy_(w)
+        for ci, t in enumerate(inputs):
+            if not torch.isfinite(t).all():
+                t_cpu = t.detach().float().cpu()
+                t_safe = torch.nan_to_num(t_cpu, nan=0.0, posinf=0.0, neginf=0.0)
+                print(f"[BAD INPUT] iter={iteration} crop={ci} shape={tuple(t.shape)}", flush=True)
+                print(f"[BAD INPUT PATCH] sample0 Cx8x8=\n{t_safe[0, :, :8, :8]}", flush=True)
+                raise RuntimeError("Non-finite in input crop")
         
-        '''
-        # 数据输入已经被标准化了
-        if args.rank == 0 and iteration < 20:  # 只看前20步
-            for ci, crop in enumerate(inputs):
-                crop_f = crop.float()
-                print(
-                    f"[iter {iteration}] crop{ci} dtype={crop.dtype} "
-                    f"min={crop_f.min().item():.3e} max={crop_f.max().item():.3e} "
-                    f"mean={crop_f.mean().item():.3e} std={crop_f.std().item():.3e}",
-                    flush=True
-                )
-        '''
+        # --- optional: dump specific iters (只做你想看的) ---
+        if args.rank == 0 and iteration in {6, 7, 8}:
+            torch.save(
+                {"iter": iteration, "inputs": [t.detach().cpu() for t in inputs]},
+                os.path.join(args.dump_path, f"debug_{iteration}_inputs_rank{args.rank}.pth"),
+            )
+
+        # ===== input sanity (rank0 only) =====
+        if args.rank == 0:
+            for ci, t in enumerate(inputs):
+                bad_nf, extreme_idx, constant_idx, absmax, std = _find_suspect_samples(t, absmax_thr=50.0)
         
-        '''
-        # ============ multi-res forward passes ... ============
-        embedding, output = model(inputs)
-        embedding = embedding.detach()
-        bs = inputs[0].size(0)
-
-        # ============ swav loss ... ============
-        loss = 0
-        for i, crop_id in enumerate(args.crops_for_assign):
-            with torch.no_grad():
-                out = output[bs * crop_id: bs * (crop_id + 1)].detach()
-
-                # time to use the queue
-                if queue is not None:
-                    if use_the_queue or not torch.all(queue[i, -1, :] == 0):
-                        use_the_queue = True
-                        out = torch.cat((torch.mm(
-                            queue[i],
-                            model.module.prototypes.weight.t()
-                        ), out))
-                    # fill the queue
-                    queue[i, bs:] = queue[i, :-bs].clone()
-                    queue[i, :bs] = embedding[crop_id * bs: (crop_id + 1) * bs]
-
-                # get assignments
-                q = distributed_sinkhorn(out)[-bs:]
-
-            # cluster assignment prediction
-            subloss = 0
-            for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
-                x = output[bs * v: bs * (v + 1)] / args.temperature
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
-            loss += subloss / (np.sum(args.nmb_crops) - 1)
-        loss /= len(args.crops_for_assign)
-        '''
-
-        '''
-        # 这一段强制最不稳定的地方使用了FP16容易数值爆炸，更改代码时，忘记了限制FP16使用场景
-        # ============ multi-res forward passes & loss (with autocast) ... ============
-        with autocast(enabled=args.use_fp16):
-            embedding, output = model(inputs)
-            embedding = embedding.detach()
-            bs = inputs[0].size(0)
-
-        loss = 0
-        for i, crop_id in enumerate(args.crops_for_assign):
-            with torch.no_grad():
-                out = output[bs * crop_id: bs * (crop_id + 1)].detach()
-
-                # queue 逻辑保持不变
-                if queue is not None:
-                    if use_the_queue or not torch.all(queue[i, -1, :] == 0):
-                        use_the_queue = True
-                        out = torch.cat((torch.mm(
-                            queue[i],
-                            model.module.prototypes.weight.t()
-                        ), out))
-                    queue[i, bs:] = queue[i, :-bs].clone()
-                    queue[i, :bs] = embedding[crop_id * bs: (crop_id + 1) * bs]
-
-                # get assignments
-                q = distributed_sinkhorn(out)[-bs:]
-
-            # cluster assignment prediction
-            subloss = 0
-            for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
-                x = output[bs * v: bs * (v + 1)] / args.temperature
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
-            loss += subloss / (np.sum(args.nmb_crops) - 1)
-        loss /= len(args.crops_for_assign)
-        '''
+                # 1) 真正 NaN/Inf（你现在已有）
+                if bad_nf:
+                    print(f"[BAD INPUT NONFINITE] iter={iteration} crop={ci} bad_idx={bad_nf} shape={tuple(t.shape)}", flush=True)
+                    # 打印第一个坏样本的 patch
+                    bi = bad_nf[0]
+                    t_cpu = torch.nan_to_num(t.detach().float().cpu(), nan=0.0, posinf=0.0, neginf=0.0)
+                    print(f"[BAD INPUT PATCH] iter={iteration} crop={ci} sample={bi} Cx8x8=\n{t_cpu[bi, :, :8, :8]}", flush=True)
+                    torch.save({"iter": iteration, "crop": ci, "bad_idx": bad_nf, "tensor": t.detach().cpu()},
+                               os.path.join(args.dump_path, f"bad_input_{iteration}_crop{ci}.pth"))
+                    raise RuntimeError("Non-finite in input crop")
         
+                # 2) 没有 NaN/Inf，但数值极端/常数（这才是你现在最可能的原因）
+                if extreme_idx or constant_idx:
+                    st = _crop_stats(t)
+                    print(f"[SUSPECT INPUT] iter={iteration} crop={ci} stats={st}", flush=True)
+        
+                    if extreme_idx:
+                        top = sorted([(i, float(absmax[i])) for i in extreme_idx], key=lambda x: -x[1])[:5]
+                        print(f"  [EXTREME] absmax>50 samples top5={top}", flush=True)
+                        bi = top[0][0]
+                        t_cpu = torch.nan_to_num(t.detach().float().cpu(), nan=0.0, posinf=0.0, neginf=0.0)
+                        print(f"  [EXTREME PATCH] crop={ci} sample={bi} Cx8x8=\n{t_cpu[bi, :, :8, :8]}", flush=True)
+        
+                    if constant_idx:
+                        print(f"  [CONSTANT] std<1e-6 samples={constant_idx[:20]} (show first 20)", flush=True)
+
+    
+                
         # ============ multi-res forward passes (autocast for memory/speed) ... ============
-        # with autocast(device_type="cuda", enabled=args.use_fp16):
         with autocast(enabled=args.use_fp16):
-            embedding, output = model(inputs)
-            embedding = embedding.detach()
+            # embedding, output = model(inputs)
+            # embedding = embedding.detach()
+            embedding, output, dbg = model(inputs, return_debug=True)
             bs = inputs[0].size(0)
+
+        emb = embedding.detach().float()
+
+        if args.rank == 0 and iteration in {6, 7, 8}:
+            def _isfinite(t):
+                return bool(torch.isfinite(t).all().item())
+            print("[FWD CHECK]",
+                  "iter", iteration,
+                  "backbone_flat", _isfinite(dbg["backbone_flat"]),
+                  "emb_pre_norm", _isfinite(dbg["emb_pre_norm"]),
+                  "embedding", _isfinite(dbg["embedding"]),
+                  "logits", _isfinite(dbg["logits"]),
+                  flush=True)
+
+        
+            # 看每个样本的 L2 norm（如果你模型里做了 normalize，这个最关键）
+            norms = torch.linalg.norm(torch.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0), dim=1)
+            print(f"[EMB NORM] iter={iteration} norm min={norms.min().item():.6f} max={norms.max().item():.6f} mean={norms.mean().item():.6f}",
+                  flush=True)
+
+        # 只在异常时触发，不会刷屏
+        try:
+            assert_finite(output, "output", iteration, dump_dir=args.dump_path)
+            assert_finite(embedding, "embedding", iteration, dump_dir=args.dump_path)
+        except RuntimeError:
+            if args.rank == 0:
+                torch.save(
+                    {"iter": iteration, "inputs": [x.detach().cpu() for x in inputs]},
+                    os.path.join(args.dump_path, f"debug_{iteration}_inputs.pth"),
+                )
+                print(f"[DEBUG] dumped inputs to debug_{iteration}_inputs.pth", flush=True)
+        
+                # 这里直接打印“这批 inputs 的 stats + 一个 patch”
+                for ci, t in enumerate(inputs):
+                    st = _crop_stats(t)
+                    print(f"[BAD FWD INPUT STATS] iter={iteration} crop={ci} stats={st}", flush=True)
+                    t_cpu = torch.nan_to_num(t.detach().float().cpu(), nan=0.0, posinf=0.0, neginf=0.0)
+                    print(f"[BAD FWD INPUT PATCH] iter={iteration} crop={ci} sample0 Cx8x8=\n{t_cpu[0, :, :8, :8]}", flush=True)
+            raise
+
 
         # ============ swav loss (assignment in fp32 for stability) ... ============
         loss = 0.0
@@ -478,6 +504,7 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             with torch.no_grad():
                 # out: logits for the crops used for assignment
                 out = output[bs * crop_id: bs * (crop_id + 1)].detach().float()  # <- fp32
+                assert_finite(out, f"out_crop{crop_id}", iteration, dump_dir=args.dump_path)
 
                 # time to use the queue
                 if queue is not None:
@@ -485,6 +512,9 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                     if use_the_queue or not torch.all(queue[i, -1, :] == 0):
                         use_the_queue = True
                         queued_logits = torch.mm(queue[i], model.module.prototypes.weight.t()).float()
+                        assert_finite(model.module.prototypes.weight, "prototypes.weight", iteration, dump_dir=args.dump_path)
+                        assert_finite(queue[i], f"queue_feat_i{i}", iteration, dump_dir=args.dump_path)
+                        assert_finite(queued_logits, f"queued_logits_i{i}", iteration, dump_dir=args.dump_path)
                         out = torch.cat((queued_logits, out), dim=0)
 
                     # fill the queue with fp32 embeddings
@@ -493,40 +523,74 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
 
                 # get assignments (fp32 sinkhorn)
                 q = distributed_sinkhorn(out)[-bs:]  # fp32
+                assert_finite(q, f"q_crop{crop_id}", iteration, dump_dir=args.dump_path)
 
             # cluster assignment prediction
             subloss = 0.0
             for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
                 # IMPORTANT: log_softmax in fp32 to prevent fp16 underflow/NaN
                 x = (output[bs * v: bs * (v + 1)] / args.temperature).float()
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
+                if not torch.isfinite(x).all():
+                    print("[BAD X] iter", iteration, "crop_id", crop_id, "v", v, flush=True)
+                    raise RuntimeError("x is non-finite")
+                x = x.clamp(min=-50, max=50)  
+                logp = F.log_softmax(x, dim=1)
+                if not torch.isfinite(logp).all():
+                    print("[BAD LOGP] iter", iteration, "crop_id", crop_id, "v", v, flush=True)
+                    raise RuntimeError("logp is non-finite")
+                assert_finite(logp, f"logp_crop{crop_id}_v{v}", iteration, dump_dir=args.dump_path)
+                subloss -= torch.mean(torch.sum(q * logp, dim=1))
             loss += subloss / (np.sum(args.nmb_crops) - 1)
 
         loss /= len(args.crops_for_assign)
+        if args.rank == 0 and iteration == 0:
+            xo = (output.float() / args.temperature)
+            print("[DEBUG] x=output/temp stats:",
+                  "min", xo.min().item(),
+                  "max", xo.max().item(),
+                  "mean", xo.mean().item(),
+                  "std", xo.std().item(),
+                  "temp", args.temperature,
+                  "lr", optimizer.param_groups[0]["lr"],
+                  "scale", scaler.get_scale(),
+                  flush=True)
+
+        # after loss computed
+        if not torch.isfinite(loss).all():
+            print("[BAD LOSS] iter", iteration, "loss", loss, flush=True)
+            raise RuntimeError("loss is non-finite before backward")
 
         # ============ backward and optim step ... ============
-        '''
-        optimizer.zero_grad()
-        if args.use_fp16:
-            with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
-        # cancel gradients for the prototypes
-        if iteration < args.freeze_prototypes_niters:
-            for name, p in model.named_parameters():
-                if "prototypes" in name:
-                    p.grad = None
-        optimizer.step()
-        optimizer.zero_grad()
-        '''
-        
         optimizer.zero_grad()
         if args.use_fp16:
             # 先缩放 loss，反向传播
             scaler.scale(loss).backward()
             # 反缩放梯度，之后才可以安全地手动修改 p.grad
             scaler.unscale_(optimizer)
+
+            # 检查梯度是否先坏
+            found_bad_grad = False
+            bad_name = None
+            for n, p in model.named_parameters():
+                if p.grad is not None and (not torch.isfinite(p.grad).all()):
+                    found_bad_grad = True
+                    bad_name = n
+                    break
+
+            if found_bad_grad:
+                if args.rank == 0:
+                    print(f"[AMP OVERFLOW] iter={iteration} bad_grad={bad_name} scale={scaler.get_scale()} lr={optimizer.param_groups[0]['lr']}", flush=True)
+                    try:
+                        print("[FIRST BAD GRAD SEEN AT]", bad_grad_first["name"], flush=True)
+                    except Exception:
+                        pass
+                        
+                optimizer.zero_grad(set_to_none=True)
+                scaler.update()   # 降低 loss scale
+                continue
+            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
             # 冻结 prototypes 的梯度
             if iteration < args.freeze_prototypes_niters:
                 for name, p in model.named_parameters():
@@ -535,6 +599,11 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             # 再做一步带缩放的 step + update 缩放因子
             scaler.step(optimizer)
             scaler.update()
+            for n, p in model.named_parameters():
+                if not torch.isfinite(p.data).all():
+                    print(f"[BAD PARAM] {n} at iter {iteration}", flush=True)
+                    raise RuntimeError(f"Non-finite param: {n} at iter {iteration}")
+        
         else:
             loss.backward()
             if iteration < args.freeze_prototypes_niters:
@@ -542,6 +611,10 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                    if "prototypes" in name and p.grad is not None:
                         p.grad = None
             optimizer.step()
+            for n, p in model.named_parameters():
+                if not torch.isfinite(p.data).all():
+                    print(f"[BAD PARAM] {n} at iter {iteration}", flush=True)
+                    raise RuntimeError(f"Non-finite param: {n} at iter {iteration}")
 
         # ============ misc ... ============
         losses.update(loss.item(), inputs[0].size(0))
@@ -565,34 +638,7 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             )
     return (epoch, losses.avg), queue
 
-'''
-@torch.no_grad()
-def distributed_sinkhorn(out):
-    Q = torch.exp(out / args.epsilon).t() # Q is K-by-B for consistency with notations from our paper
-    B = Q.shape[1] * args.world_size # number of samples to assign
-    K = Q.shape[0] # how many prototypes
 
-    # make the matrix sums to 1
-    sum_Q = torch.sum(Q)
-    dist.all_reduce(sum_Q)
-    Q /= sum_Q
-
-    for it in range(args.sinkhorn_iterations):
-        # normalize each row: total weight per prototype must be 1/K
-        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-        dist.all_reduce(sum_of_rows)
-        Q /= sum_of_rows
-        Q /= K
-
-        # normalize each column: total weight per sample must be 1/B
-        Q /= torch.sum(Q, dim=0, keepdim=True)
-        Q /= B
-
-    Q *= B # the colomns must sum to 1 so that Q is an assignment
-    return Q.t()
-'''
-
-# 强制 fp32 + max-shift + eps 防 0 除
 @torch.no_grad()
 def distributed_sinkhorn(out):
     # ---- enforce fp32 for numerical stability ----

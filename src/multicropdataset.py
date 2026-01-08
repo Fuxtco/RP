@@ -12,8 +12,26 @@ import numpy as np
 import torchvision.datasets as datasets #包含ImageFolder数据集类
 import torchvision.transforms as transforms
 
+from PIL import Image
 
 logger = getLogger()
+
+
+def convert_16bit_tif_to_8bit_rgb(pil_img):
+    """
+    Convert 16-bit or 48-bit TIFF images to 8-bit RGB.
+    """
+    arr = np.array(pil_img)
+
+    # 如果是16bit（48bit tiff 的 dtype 也是 uint16）
+    if arr.dtype == np.uint16:
+        arr = (arr / 256).astype(np.uint8)   # 16bit → 8bit
+
+    # 如果是单通道灰度图，把它变成 3 通道
+    if arr.ndim == 2:
+        arr = np.stack([arr, arr, arr], axis=-1)
+
+    return Image.fromarray(arr)
 
 
 class MultiCropDataset(datasets.ImageFolder):
@@ -49,6 +67,9 @@ class MultiCropDataset(datasets.ImageFolder):
             # extend将transform加入列表
             # compose将变换组合为流水线
             trans.extend([transforms.Compose([
+                
+                transforms.Lambda(convert_16bit_tif_to_8bit_rgb),
+
                 randomresizedcrop, #随即裁剪
                 transforms.RandomHorizontalFlip(p=0.5), #翻转
                 transforms.Compose(color_transform), #颜色扰动
