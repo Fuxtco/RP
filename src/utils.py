@@ -9,6 +9,8 @@ import argparse
 from logging import getLogger
 import pickle
 import os
+# 正则安全解析SLURM_TASKS_PER_NODE
+import re
 
 import numpy as np
 import torch
@@ -35,7 +37,7 @@ def bool_flag(s):
     else:
         raise argparse.ArgumentTypeError("invalid value for a boolean flag")
 
-
+'''
 def init_distributed_mode(args):
     """
     Initialize the following variables:
@@ -51,11 +53,11 @@ def init_distributed_mode(args):
         args.rank = int(os.environ["SLURM_PROCID"])
         # 集群使用了多少节点，每个节点多少任务
         args.world_size = int(os.environ["SLURM_NTASKS"])
-        '''
+        """
         这里网端没改动
         args.world_size = int(os.environ["SLURM_NNODES"]) * int(
             os.environ["SLURM_TASKS_PER_NODE"][0]
-        )'''
+        )"""
     else:
         # multi-GPU job (local or multi-node) - jobs started with torch.distributed.launch
         # read environment variables
@@ -70,12 +72,12 @@ def init_distributed_mode(args):
         rank=args.rank,
     )
 
-    '''
+    """
     # set cuda device
     这里网端没改动
     args.gpu_to_work_on = args.rank % torch.cuda.device_count()
     torch.cuda.set_device(args.gpu_to_work_on)
-    '''
+    """
     
     # set cuda device
     if args.is_slurm_job and "SLURM_LOCALID" in os.environ:
@@ -88,8 +90,63 @@ def init_distributed_mode(args):
     torch.cuda.set_device(args.gpu_to_work_on)
     
     return
+'''
 
+def init_distributed_mode(args):
+    """
+    Initialize:
+      - args.rank
+      - args.world_size
+      - args.gpu_to_work_on
+    """
 
+    args.is_slurm_job = "SLURM_JOB_ID" in os.environ
+
+    # 优先使用 torchrun 的环境变量（即使在 Slurm job 里也优先）
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    elif args.is_slurm_job:
+        args.rank = int(os.environ["SLURM_PROCID"])
+
+        # 优先用 SLURM_NTASKS（最可靠）
+        if "SLURM_NTASKS" in os.environ:
+            args.world_size = int(os.environ["SLURM_NTASKS"])
+        else:
+            # fallback: NNODES * TASKS_PER_NODE（处理 "4(x2)" 这种格式）
+            tasks_per_node_str = os.environ.get("SLURM_TASKS_PER_NODE", "1")
+            tasks_per_node = int(re.match(r"\d+", tasks_per_node_str).group())
+            args.world_size = int(os.environ.get("SLURM_NNODES", "1")) * tasks_per_node
+
+        # 优先用 SLURM_LOCALID 作为本节点 local rank
+        local_rank = int(os.environ.get("SLURM_LOCALID", 0))
+
+    else:
+        # single process fallback
+        args.rank = 0
+        args.world_size = 1
+        local_rank = 0
+
+    # prepare distributed (only if actually multi-process)
+    if args.world_size > 1:
+        dist.init_process_group(
+            backend="nccl",
+            init_method=args.dist_url,
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+
+    # 用 local_rank 选 GPU（比 rank % device_count 更对）
+    if torch.cuda.is_available():
+        ngpu = torch.cuda.device_count()
+        args.gpu_to_work_on = local_rank % max(1, ngpu)
+        torch.cuda.set_device(args.gpu_to_work_on)
+    else:
+        args.gpu_to_work_on = -1
+
+    
 def initialize_exp(params, *args, dump_params=True):
     """
     Initialize the experience:
@@ -118,9 +175,17 @@ def initialize_exp(params, *args, dump_params=True):
         os.path.join(params.dump_path, "train.log"), rank=params.rank
     )
     logger.info("============ Initialized logger ============")
-    logger.info(
-        "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(params)).items()))
-    )
+    logger.info(f"[dist-ok] rank={params.rank} world_size={params.world_size} gpu={params.gpu_to_work_on}")
+    #----------------------只让 rank0 打印完整参数------------------
+    #logger.info(
+    #    "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(params)).items()))
+    #)
+    if params.rank == 0:
+        logger.info(
+            "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(vars(params).items()))
+        )
+    #----------------------------------------------------------
+    
     logger.info("The experiment will be stored in %s\n" % params.dump_path)
     logger.info("")
     return logger, training_stats

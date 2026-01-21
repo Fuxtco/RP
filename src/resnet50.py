@@ -110,7 +110,7 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         identity = x
-
+        
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
@@ -133,20 +133,20 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(
-            self,
-            block,
-            layers,
-            zero_init_residual=False,
-            groups=1,
-            widen=1,
-            width_per_group=64,
-            replace_stride_with_dilation=None,
-            norm_layer=None,
-            normalize=False,
-            output_dim=0,
-            hidden_mlp=0,
-            nmb_prototypes=0,
-            eval_mode=False,
+                self,
+                block,
+                layers,
+                zero_init_residual=False,
+                groups=1,
+                widen=1,
+                width_per_group=64,
+                replace_stride_with_dilation=None,
+                norm_layer=None,
+                normalize=False,
+                output_dim=0,
+                hidden_mlp=0,
+                nmb_prototypes=0,
+                eval_mode=False,
     ):
         super(ResNet, self).__init__()
         if norm_layer is None:
@@ -181,15 +181,27 @@ class ResNet(nn.Module):
         self.layer1 = self._make_layer(block, num_out_filters, layers[0])
         num_out_filters *= 2
         self.layer2 = self._make_layer(
-            block, num_out_filters, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
+            block,
+            num_out_filters,
+            layers[1],
+            stride=2,
+            dilate=replace_stride_with_dilation[0],
         )
         num_out_filters *= 2
         self.layer3 = self._make_layer(
-            block, num_out_filters, layers[2], stride=2, dilate=replace_stride_with_dilation[1]
+            block,
+            num_out_filters,
+            layers[2],
+            stride=2,
+            dilate=replace_stride_with_dilation[1],
         )
         num_out_filters *= 2
         self.layer4 = self._make_layer(
-            block, num_out_filters, layers[3], stride=2, dilate=replace_stride_with_dilation[2]
+            block,
+            num_out_filters,
+            layers[3],
+            stride=2,
+            dilate=replace_stride_with_dilation[2],
         )
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
@@ -200,7 +212,9 @@ class ResNet(nn.Module):
         if output_dim == 0:
             self.projection_head = None
         elif hidden_mlp == 0:
-            self.projection_head = nn.Linear(num_out_filters * block.expansion, output_dim)
+            self.projection_head = nn.Linear(
+                num_out_filters * block.expansion, output_dim
+            )
         else:
             self.projection_head = nn.Sequential(
                 nn.Linear(num_out_filters * block.expansion, hidden_mlp),
@@ -301,11 +315,71 @@ class ResNet(nn.Module):
         if self.l2norm:
             x = nn.functional.normalize(x, dim=1, p=2)
 
+        '''
         if self.prototypes is not None:
             return x, self.prototypes(x)
         return x
+        '''
+
+        # prototype logits 的计算强制 fp32
+        if self.prototypes is not None:
+            # prototypes logits: force fp32 to avoid fp16 overflow/NaN under autocast
+            with torch.cuda.amp.autocast(enabled=False):
+                out = self.prototypes(x.float())
+            return x, out
+        return x
+
+    '''
+    def forward_head(self, x, return_debug=False):
+        dbg = {}
+        if self.projection_head is not None:
+            dbg["backbone_flat"] = x
+            x = self.projection_head(x)
+            dbg["emb_pre_norm"] = x
+        else:
+            dbg["backbone_flat"] = x
+            dbg["emb_pre_norm"] = x
+
+        if self.l2norm:
+            x = nn.functional.normalize(x, dim=1, p=2)
+        dbg["embedding"] = x
+
+        if self.prototypes is not None:
+            out = self.prototypes(x)
+            dbg["logits"] = out
+            if return_debug:
+                return x, out, dbg
+            return x, out
+
+        if return_debug:
+            return x, dbg
+        return x
+    '''
 
     def forward(self, inputs):
+        if not isinstance(inputs, list):
+            inputs = [inputs]
+        idx_crops = torch.cumsum(
+            torch.unique_consecutive(
+                torch.tensor([inp.shape[-1] for inp in inputs]),
+                return_counts=True,
+            )[1],
+            0,
+        )
+        start_idx = 0
+        for end_idx in idx_crops:
+            _out = self.forward_backbone(
+                torch.cat(inputs[start_idx:end_idx]).cuda(non_blocking=True)
+            )
+            if start_idx == 0:
+                output = _out
+            else:
+                output = torch.cat((output, _out))
+            start_idx = end_idx
+        return self.forward_head(output)
+
+    '''
+    def forward(self, inputs, return_debug=False):
         if not isinstance(inputs, list):
             inputs = [inputs]
         idx_crops = torch.cumsum(torch.unique_consecutive(
@@ -320,7 +394,8 @@ class ResNet(nn.Module):
             else:
                 output = torch.cat((output, _out))
             start_idx = end_idx
-        return self.forward_head(output)
+        return self.forward_head(output, return_debug=return_debug)
+    '''
 
 
 class MultiPrototypes(nn.Module):

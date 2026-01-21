@@ -119,7 +119,6 @@ class PILRandomGaussianBlur(object):
 
 def get_color_distortion(s=1.0):
     # s is the strength of color distortion.
-
     # 创建颜色抖动，随即改变brightness,contrast,saturation,hue
     color_jitter = transforms.ColorJitter(0.8*s, 0.8*s, 0.8*s, 0.2*s)
     # 概率包裹执行

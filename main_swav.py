@@ -25,11 +25,7 @@ import apex
 from apex.parallel.LARC import LARC
 '''
 from src.larc import LARC
-from torch.amp import GradScaler, autocast
-'''
-还是用这个环境不支持
 from torch.cuda.amp import GradScaler, autocast
-'''
 
 from src.utils import (
     bool_flag,
@@ -74,8 +70,7 @@ parser.add_argument("--sinkhorn_iterations", default=3, type=int,
                     help="number of iterations in Sinkhorn-Knopp algorithm")
 parser.add_argument("--feat_dim", default=128, type=int,
                     help="feature dimension")
-##prototypes设置100
-parser.add_argument("--nmb_prototypes", default=3000, type=int,
+parser.add_argument("--nmb_prototypes", default=100, type=int,
                     help="number of prototypes")
 parser.add_argument("--queue_length", type=int, default=0,
                     help="length of the queue (0 for no queue)")
@@ -85,14 +80,6 @@ parser.add_argument("--epoch_queue_starts", type=int, default=15,
 #########################
 #### optim parameters ###
 #########################
-
-## 小数据/小batch更稳
-parser.add_argument("--optimizer", default="adamw", type=str,
-                    choices=["sgd", "adamw"])
-parser.add_argument("--betas", default=[0.9, 0.999], type=float, nargs=2)
-parser.add_argument("--eps", default=1e-8, type=float)
-##
-
 parser.add_argument("--epochs", default=100, type=int,
                     help="number of total epochs to run")
 parser.add_argument("--batch_size", default=64, type=int,
@@ -141,55 +128,6 @@ parser.add_argument("--syncbn_process_group_size", type=int, default=8, help="""
 parser.add_argument("--dump_path", type=str, default=".",
                     help="experiment dump path for checkpoints and log")
 parser.add_argument("--seed", type=int, default=31, help="seed")
-
-def is_master():
-    return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
-
-@torch.no_grad()
-def dump_debug(payload: dict, dump_dir: str, tag: str):
-    os.makedirs(dump_dir, exist_ok=True)
-    path = os.path.join(dump_dir, f"debug_{tag}.pth")
-    torch.save(payload, path)
-    if is_master():
-        print(f"[DEBUG] dumped to: {path}", flush=True)
-
-def assert_finite(t: torch.Tensor, name: str, iteration: int, dump_dir: str, extra: dict = None):
-    """No spam: only acts when non-finite appears."""
-    if t is None:
-        return
-    if torch.isfinite(t).all():
-        return
-
-    # minimal stats
-    finite = torch.isfinite(t)
-    bad_cnt = (~finite).sum().item()
-    tf = t[finite]
-    stats = {
-        "name": name,
-        "iter": iteration,
-        "shape": tuple(t.shape),
-        "dtype": str(t.dtype),
-        "device": str(t.device),
-        "bad_count": bad_cnt,
-    }
-    if tf.numel() > 0:
-        stats.update({
-            "finite_min": tf.min().item(),
-            "finite_max": tf.max().item(),
-            "finite_mean": tf.mean().item(),
-        })
-
-    if is_master():
-        print(f"[NaN/Inf] {stats}", flush=True)
-
-    # dump only small slices to avoid huge files
-    payload = {"stats": stats}
-    if extra is not None:
-        payload["extra"] = extra
-    dump_debug(payload, dump_dir, tag=f"{iteration}_{name}")
-
-    raise RuntimeError(f"Non-finite tensor: {name} at iter {iteration}")
-
 
 def main():
     global args
@@ -246,29 +184,17 @@ def main():
         logger.info(model)
     logger.info("Building model done.")
 
-    # build optimizer
-    # 增加optimizer选择：
-    if args.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=args.base_lr,
-            betas=tuple(args.betas),
-            eps=args.eps,
-            weight_decay=args.wd,
-        )
-    else:
-        optimizer = torch.optim.SGD(
-            model.parameters(),
-            lr=args.base_lr,
-            momentum=0.9,
-            weight_decay=args.wd,
-        )
-        optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
-    # build lr schedule (for BOTH optimizers)
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=args.base_lr,
+        momentum=0.9,
+        weight_decay=args.wd,
+    )
+    optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
     warmup_lr_schedule = np.linspace(args.start_warmup, args.base_lr, len(train_loader) * args.warmup_epochs)
     iters = np.arange(len(train_loader) * (args.epochs - args.warmup_epochs))
     cosine_lr_schedule = np.array([args.final_lr + 0.5 * (args.base_lr - args.final_lr) * (1 + \
-                        math.cos(math.pi * t / (len(train_loader) * (args.epochs - args.warmup_epochs)))) for t in iters])
+                         math.cos(math.pi * t / (len(train_loader) * (args.epochs - args.warmup_epochs)))) for t in iters])
     lr_schedule = np.concatenate((warmup_lr_schedule, cosine_lr_schedule))
     logger.info("Building optimizer done.")
 
@@ -278,11 +204,10 @@ def main():
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level="O1")
         logger.info("Initializing mixed precision done.")
     '''
-    # (torch.cuda.amp) --> (torch.amp)
-    # scaler = GradScaler(enabled=args.use_fp16)
-    scaler = GradScaler(device_type="cuda", enabled=args.use_fp16)
+    # (torch.cuda.amp)
+    scaler = GradScaler(enabled=args.use_fp16)
     if args.use_fp16:
-        logger.info("Initializing mixed precision with torch.amp done.")
+        logger.info("Initializing mixed precision with torch.cuda.amp done.")
 
     # wrap model
     model = nn.parallel.DistributedDataParallel(
@@ -355,7 +280,7 @@ def main():
             torch.save({"queue": queue}, queue_path)
 
 
-def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
+def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue): 
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -365,111 +290,107 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
 
     end = time.time()
     for it, inputs in enumerate(train_loader):
+
         # measure data loading time
         data_time.update(time.time() - end)
 
         # update learning rate
-        # 算法层面，repear sampler，人为扩大epoch步数，让LR schedule更平滑，避免epoch太短导致统计不稳定，对其prototype，queue更新节奏
         iteration = epoch * len(train_loader) + it
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr_schedule[iteration]
-
+                
+        '''
         # normalize the prototypes
         with torch.no_grad():
             w = model.module.prototypes.weight.data.clone()
             w = nn.functional.normalize(w, dim=1, p=2)
             model.module.prototypes.weight.copy_(w)
-        
         '''
-        # 数据输入已经被标准化了
-        if args.rank == 0 and iteration < 20:  # 只看前20步
-            for ci, crop in enumerate(inputs):
-                crop_f = crop.float()
-                print(
-                    f"[iter {iteration}] crop{ci} dtype={crop.dtype} "
-                    f"min={crop_f.min().item():.3e} max={crop_f.max().item():.3e} "
-                    f"mean={crop_f.mean().item():.3e} std={crop_f.std().item():.3e}",
-                    flush=True
-                )
-        '''
-        
-        '''
-        # ============ multi-res forward passes ... ============
-        embedding, output = model(inputs)
-        embedding = embedding.detach()
-        bs = inputs[0].size(0)
-
-        # ============ swav loss ... ============
-        loss = 0
-        for i, crop_id in enumerate(args.crops_for_assign):
+        # normalize the prototypes (with safety checks)
+        if model.module.prototypes is not None:
             with torch.no_grad():
-                out = output[bs * crop_id: bs * (crop_id + 1)].detach()
+                w0 = model.module.prototypes.weight.data
+                if not torch.isfinite(w0).all():
+                    n_nan = torch.isnan(w0).sum().item()
+                    n_inf = torch.isinf(w0).sum().item()
+                    logger.error(
+                        f"[rank={args.rank}] Non-finite prototypes weight before norm "
+                        f"at epoch={epoch}, it={it}: nan={n_nan}, inf={n_inf}"
+                    )
+                    raise RuntimeError("Non-finite prototypes weights, stopping training")
 
-                # time to use the queue
-                if queue is not None:
-                    if use_the_queue or not torch.all(queue[i, -1, :] == 0):
-                        use_the_queue = True
-                        out = torch.cat((torch.mm(
-                            queue[i],
-                            model.module.prototypes.weight.t()
-                        ), out))
-                    # fill the queue
-                    queue[i, bs:] = queue[i, :-bs].clone()
-                    queue[i, :bs] = embedding[crop_id * bs: (crop_id + 1) * bs]
+                # 外部已经强制prototypes成为fp32，就不需要.float()
+                # w = F.normalize(w0.float(), dim=1, p=2)
+                w = F.normalize(w0, dim=1, p=2).detach()          # normalize in fp32
+                model.module.prototypes.weight.copy_(w)  # keep original dtype
 
-                # get assignments
-                q = distributed_sinkhorn(out)[-bs:]
 
-            # cluster assignment prediction
-            subloss = 0
-            for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
-                x = output[bs * v: bs * (v + 1)] / args.temperature
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
-            loss += subloss / (np.sum(args.nmb_crops) - 1)
-        loss /= len(args.crops_for_assign)
-        '''
+        # ---- debug: prototype dtype (only once) ----
+        if args.rank == 0 and epoch == 0 and it == 0:
+            w = model.module.prototypes.weight
+            logger.info(
+                f"[DEBUG] prototypes.weight dtype={w.dtype}, "
+                f"min={w.min().item():.4g}, max={w.max().item():.4g}"
+            )
 
-        '''
-        # 这一段强制最不稳定的地方使用了FP16容易数值爆炸，更改代码时，忘记了限制FP16使用场景
-        # ============ multi-res forward passes & loss (with autocast) ... ============
-        with autocast(enabled=args.use_fp16):
-            embedding, output = model(inputs)
-            embedding = embedding.detach()
-            bs = inputs[0].size(0)
-
-        loss = 0
-        for i, crop_id in enumerate(args.crops_for_assign):
-            with torch.no_grad():
-                out = output[bs * crop_id: bs * (crop_id + 1)].detach()
-
-                # queue 逻辑保持不变
-                if queue is not None:
-                    if use_the_queue or not torch.all(queue[i, -1, :] == 0):
-                        use_the_queue = True
-                        out = torch.cat((torch.mm(
-                            queue[i],
-                            model.module.prototypes.weight.t()
-                        ), out))
-                    queue[i, bs:] = queue[i, :-bs].clone()
-                    queue[i, :bs] = embedding[crop_id * bs: (crop_id + 1) * bs]
-
-                # get assignments
-                q = distributed_sinkhorn(out)[-bs:]
-
-            # cluster assignment prediction
-            subloss = 0
-            for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
-                x = output[bs * v: bs * (v + 1)] / args.temperature
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
-            loss += subloss / (np.sum(args.nmb_crops) - 1)
-        loss /= len(args.crops_for_assign)
-        '''
-        
+        inputs = [x.cuda(non_blocking=True) for x in inputs]
         # ============ multi-res forward passes (autocast for memory/speed) ... ============
-        # with autocast(device_type="cuda", enabled=args.use_fp16):
         with autocast(enabled=args.use_fp16):
+            with autocast(enabled=args.use_fp16):
+            # Forward pass: obtain embeddings and prototype logits
             embedding, output = model(inputs)
+
+            # ---- debug: forward dtype (only once) ----
+            if args.rank == 0 and epoch == 0 and it == 0:
+                logger.info(
+                    f"[DEBUG] embedding dtype={embedding.dtype}, "
+                    f"output dtype={output.dtype}"
+                )
+
+            # ---- Numerical stability check (model output) ----
+            # If NaN or Inf appears in the model outputs (prototype logits),
+            # the training is already numerically unstable and must be stopped
+            # immediately to avoid log explosion and corrupted checkpoints.
+            # ---- Numerical stability check (model output) ----
+            if not torch.isfinite(output).all():
+                lr = optimizer.param_groups[0]["lr"]
+                n_nan = torch.isnan(output).sum().item()
+                n_inf = torch.isinf(output).sum().item()
+
+                if args.rank == 0:
+                    finite_mask = torch.isfinite(output)
+                    if finite_mask.any():
+                        o_min = output[finite_mask].min().item()
+                        o_max = output[finite_mask].max().item()
+                    else:
+                        o_min, o_max = float("nan"), float("nan")
+
+                    logger.error(
+                        f"[rank={args.rank}] Non-finite output at epoch={epoch}, it={it}, lr={lr} | "
+                        f"nan={n_nan}, inf={n_inf}, finite_min={o_min:.6g}, finite_max={o_max:.6g}, "
+                        f"shape={tuple(output.shape)}, dtype={output.dtype}"
+                    )
+                else:
+                    logger.error(
+                        f"[rank={args.rank}] Non-finite output at epoch={epoch}, it={it}, lr={lr} | "
+                        f"nan={n_nan}, inf={n_inf}"
+                    )
+
+                raise RuntimeError("Non-finite output, stopping training")
+                
+            # Detach embeddings to avoid backpropagation through the assignment path
             embedding = embedding.detach()
+
+            # ---- Numerical stability check (embedding) ----
+            # Even if the output logits are finite, embeddings may already contain
+            # NaN/Inf values (e.g. due to fp16 overflow or unstable gradients).
+            # Detecting this early prevents silent corruption of the queue.
+            if not torch.isfinite(embedding).all():
+                if args.rank == 0:
+                    logger.error(f"Non-finite embedding at epoch={epoch}, it={it}")
+                raise RuntimeError("Non-finite embedding, stopping training")
+
+            # Batch size for one crop (used in SwAV loss computation)
             bs = inputs[0].size(0)
 
         # ============ swav loss (assignment in fp32 for stability) ... ============
@@ -499,42 +420,50 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             for v in np.delete(np.arange(np.sum(args.nmb_crops)), crop_id):
                 # IMPORTANT: log_softmax in fp32 to prevent fp16 underflow/NaN
                 x = (output[bs * v: bs * (v + 1)] / args.temperature).float()
-                subloss -= torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
+                x = x.clamp(min=-50, max=50)  
+                logp = F.log_softmax(x, dim=1)
+                subloss -= torch.mean(torch.sum(q * logp, dim=1))
             loss += subloss / (np.sum(args.nmb_crops) - 1)
 
         loss /= len(args.crops_for_assign)
 
+        # --- stop early on NaN/Inf to avoid huge logs / wasted GPU time ---
+        if not torch.isfinite(loss):
+            logger.error(
+                f"NaN detected at epoch {epoch}, iter {it}, loss={loss.item()}"
+            )
+            raise RuntimeError("NaN loss, stopping training")
+
         # ============ backward and optim step ... ============
-        '''
-        optimizer.zero_grad()
-        if args.use_fp16:
-            with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
-        # cancel gradients for the prototypes
-        if iteration < args.freeze_prototypes_niters:
-            for name, p in model.named_parameters():
-                if "prototypes" in name:
-                    p.grad = None
-        optimizer.step()
-        optimizer.zero_grad()
-        '''
-        
         optimizer.zero_grad()
         if args.use_fp16:
             # 先缩放 loss，反向传播
             scaler.scale(loss).backward()
             # 反缩放梯度，之后才可以安全地手动修改 p.grad
-            scaler.unscale_(optimizer)
+            scaler.unscale_(optimizer)           
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
             # 冻结 prototypes 的梯度
+            '''
             if iteration < args.freeze_prototypes_niters:
                 for name, p in model.named_parameters():
                     if "prototypes" in name and p.grad is not None:
                         p.grad = None
+            '''
+            # cancel gradients for prototypes during the freeze period (same behavior as original SwAV)
+            if iteration < args.freeze_prototypes_niters and model.module.prototypes is not None:
+                for p in model.module.prototypes.parameters():
+                    if p.grad is not None and (not torch.isfinite(p.grad).all()) and args.rank == 0:
+                        logger.warning(
+                            f"[rank={args.rank}] Non-finite prototypes grad ignored (frozen) "
+                            f"at epoch={epoch}, it={it}"
+                        )
+                    p.grad = None
+
             # 再做一步带缩放的 step + update 缩放因子
             scaler.step(optimizer)
             scaler.update()
+        
         else:
             loss.backward()
             if iteration < args.freeze_prototypes_niters:
@@ -547,7 +476,7 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
         losses.update(loss.item(), inputs[0].size(0))
         batch_time.update(time.time() - end)
         end = time.time()
-        if args.rank ==0 and it % 50 == 0:
+        if args.rank ==0 and it % 100 == 0:
             logger.info(
                 "Epoch: [{0}][{1}]\t"
                 "Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
@@ -565,34 +494,7 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             )
     return (epoch, losses.avg), queue
 
-'''
-@torch.no_grad()
-def distributed_sinkhorn(out):
-    Q = torch.exp(out / args.epsilon).t() # Q is K-by-B for consistency with notations from our paper
-    B = Q.shape[1] * args.world_size # number of samples to assign
-    K = Q.shape[0] # how many prototypes
 
-    # make the matrix sums to 1
-    sum_Q = torch.sum(Q)
-    dist.all_reduce(sum_Q)
-    Q /= sum_Q
-
-    for it in range(args.sinkhorn_iterations):
-        # normalize each row: total weight per prototype must be 1/K
-        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-        dist.all_reduce(sum_of_rows)
-        Q /= sum_of_rows
-        Q /= K
-
-        # normalize each column: total weight per sample must be 1/B
-        Q /= torch.sum(Q, dim=0, keepdim=True)
-        Q /= B
-
-    Q *= B # the colomns must sum to 1 so that Q is an assignment
-    return Q.t()
-'''
-
-# 强制 fp32 + max-shift + eps 防 0 除
 @torch.no_grad()
 def distributed_sinkhorn(out):
     # ---- enforce fp32 for numerical stability ----

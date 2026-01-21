@@ -26,7 +26,7 @@ class LARC(Optimizer):
         self,
         optimizer: Optimizer,
         trust_coefficient: float = 0.001,
-        clip: bool = False,
+        clip: bool = True,
         eps: float = 1e-8,
         always_adapt: bool = False,
     ):
@@ -73,16 +73,26 @@ class LARC(Optimizer):
                 p_data = p.data
                 g_data = p.grad.data
 
+                # ================================================
+                '''
                 # 计算参数范数和梯度范数
                 param_norm = torch.norm(p_data)
                 grad_norm = torch.norm(g_data)
 
                 # 避免 0 / 0
-                if param_norm == 0 or grad_norm == 0:
+                # if param_norm == 0 or grad_norm == 0:
+                #     continue
+                # ========================================
+                # skip if non-finite or too small 更稳健
+                if not torch.isfinite(param_norm) or not torch.isfinite(grad_norm):
+                    continue
+                if param_norm.item() == 0.0 or grad_norm.item() == 0.0:
                     continue
 
                 # 按论文公式计算 local_lr
-                local_lr = self.trust_coefficient * param_norm / (grad_norm + self.eps)
+                # local_lr = self.trust_coefficient * param_norm / (grad_norm + self.eps)
+                # local_lr 是 Tensor，lr 是 float。Python 的 min() 在这种混合类型下会触发 Tensor 的比较逻辑，有时会报错或产生不确定行为。
+                local_lr = (self.trust_coefficient * param_norm / (grad_norm + self.eps)).item()
 
                 # 是否只截断不放大
                 if self.clip:
@@ -91,6 +101,36 @@ class LARC(Optimizer):
                     actual_lr = local_lr
 
                 # 通过缩放梯度来“等效改变学习率”
+                g_data.mul_(actual_lr / (lr + self.eps))
+                '''
+
+                # norms in fp32 for stability
+                param_norm = torch.norm(p_data.float())
+
+                # include weight decay in the norm (LARC standard behavior)
+                wd = group.get("weight_decay", 0.0)
+                if wd != 0.0:
+                    g_for_norm = g_data.float().add(p_data.float(), alpha=wd)  # g + wd*w
+                else:
+                    g_for_norm = g_data.float()
+
+                grad_norm = torch.norm(g_for_norm)
+
+                # skip if non-finite or too small
+                if not torch.isfinite(param_norm) or not torch.isfinite(grad_norm):
+                    continue
+                pn = param_norm.item()
+                gn = grad_norm.item()
+                if pn == 0.0 or gn == 0.0:
+                    continue
+
+                # local lr as python float
+                local_lr = self.trust_coefficient * pn / (gn + self.eps)
+
+                # clipping mode (recommended for stability)
+                actual_lr = min(local_lr, lr) if self.clip else local_lr
+
+                # scale the original gradient in-place
                 g_data.mul_(actual_lr / (lr + self.eps))
 
         # 交给内部优化器做真正的参数更新

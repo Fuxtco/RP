@@ -100,15 +100,18 @@ def main():
     # build data
     train_dataset = datasets.ImageFolder(os.path.join(args.data_path, "train"))
     val_dataset = datasets.ImageFolder(os.path.join(args.data_path, "val"))
+    # ImageNet 标准均值方差
     tr_normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.228, 0.224, 0.225]
     )
+    # 训练增强
     train_dataset.transform = transforms.Compose([
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         tr_normalize,
     ])
+    # 验证增强
     val_dataset.transform = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
@@ -133,7 +136,8 @@ def main():
 
     # build model
     model = resnet_models.__dict__[args.arch](output_dim=0, eval_mode=True)
-    linear_classifier = RegLog(1000, args.arch, args.global_pooling, args.use_bn)
+    num_labels = len(train_dataset.classes)
+    linear_classifier = RegLog(num_labels, args.arch, args.global_pooling, args.use_bn)
 
     # convert batch norm layers (if any)
     linear_classifier = nn.SyncBatchNorm.convert_sync_batchnorm(linear_classifier)
