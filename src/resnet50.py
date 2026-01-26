@@ -237,9 +237,6 @@ class ResNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-        # Zero-initialize the last BN in each residual branch,
-        # so that the residual branch starts with zeros, and each residual block behaves like an identity.
-        # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
         if zero_init_residual:
             for m in self.modules():
                 if isinstance(m, Bottleneck):
@@ -315,46 +312,12 @@ class ResNet(nn.Module):
         if self.l2norm:
             x = nn.functional.normalize(x, dim=1, p=2)
 
-        '''
-        if self.prototypes is not None:
-            return x, self.prototypes(x)
-        return x
-        '''
-
-        # prototype logits 的计算强制 fp32
         if self.prototypes is not None:
             # prototypes logits: force fp32 to avoid fp16 overflow/NaN under autocast
             with torch.cuda.amp.autocast(enabled=False):
                 out = self.prototypes(x.float())
             return x, out
         return x
-
-    '''
-    def forward_head(self, x, return_debug=False):
-        dbg = {}
-        if self.projection_head is not None:
-            dbg["backbone_flat"] = x
-            x = self.projection_head(x)
-            dbg["emb_pre_norm"] = x
-        else:
-            dbg["backbone_flat"] = x
-            dbg["emb_pre_norm"] = x
-
-        if self.l2norm:
-            x = nn.functional.normalize(x, dim=1, p=2)
-        dbg["embedding"] = x
-
-        if self.prototypes is not None:
-            out = self.prototypes(x)
-            dbg["logits"] = out
-            if return_debug:
-                return x, out, dbg
-            return x, out
-
-        if return_debug:
-            return x, dbg
-        return x
-    '''
 
     def forward(self, inputs):
         if not isinstance(inputs, list):
@@ -377,26 +340,6 @@ class ResNet(nn.Module):
                 output = torch.cat((output, _out))
             start_idx = end_idx
         return self.forward_head(output)
-
-    '''
-    def forward(self, inputs, return_debug=False):
-        if not isinstance(inputs, list):
-            inputs = [inputs]
-        idx_crops = torch.cumsum(torch.unique_consecutive(
-            torch.tensor([inp.shape[-1] for inp in inputs]),
-            return_counts=True,
-        )[1], 0)
-        start_idx = 0
-        for end_idx in idx_crops:
-            _out = self.forward_backbone(torch.cat(inputs[start_idx: end_idx]).cuda(non_blocking=True))
-            if start_idx == 0:
-                output = _out
-            else:
-                output = torch.cat((output, _out))
-            start_idx = end_idx
-        return self.forward_head(output, return_debug=return_debug)
-    '''
-
 
 class MultiPrototypes(nn.Module):
     def __init__(self, output_dim, nmb_prototypes):

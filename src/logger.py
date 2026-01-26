@@ -13,23 +13,18 @@ import pandas as pd
 
 
 class LogFormatter:
-    # 格式化日志
-
     def __init__(self):
         self.start_time = time.time()
 
-    # record: Python内置日志系统传入的一条
     def format(self, record):
         elapsed_seconds = round(record.created - self.start_time)
 
-        # 构成日志前缀
         prefix = "%s - %s - %s" % (
             record.levelname,
             time.strftime("%x %X"),
             timedelta(seconds=elapsed_seconds),
         )
         message = record.getMessage()
-        # 把每个换行换成换行加前缀长度和三个空格的缩进，满足缩进格式，便于查看
         message = message.replace("\n", "\n" + " " * (len(prefix) + 3))
         return "%s - %s" % (prefix, message) if message else ""
 
@@ -46,7 +41,6 @@ def create_logger(filepath, rank):
     if filepath is not None:
         if rank > 0:
             filepath = "%s-%i" % (filepath, rank)
-        # a-追加模式
         file_handler = logging.FileHandler(filepath, "a")
         # file_handler.setLevel(logging.DEBUG)
         file_handler.setLevel(logging.INFO)
@@ -67,7 +61,6 @@ def create_logger(filepath, rank):
     logger.addHandler(console_handler)
 
     # reset logger elapsed time
-    # 便于查看每个epoch的时间
     def reset_time():
         log_formatter.start_time = time.time()
 

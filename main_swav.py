@@ -40,7 +40,6 @@ import src.resnet50 as resnet_models
 
 logger = getLogger()
 
-## 定义一个命令行参数解析器，这个脚本的所有超参数都通过它来管理 ##
 parser = argparse.ArgumentParser(description="Implementation of SwAV")
 
 #########################
@@ -117,7 +116,7 @@ parser.add_argument("--workers", default=10, type=int,
 parser.add_argument("--checkpoint_freq", type=int, default=25,
                     help="Save the model periodically")
 
-# apex相关，需要替换
+# apex
 parser.add_argument("--use_fp16", type=bool_flag, default=True,
                     help="whether to train with mixed precision or not")
 parser.add_argument("--sync_bn", type=str, default="pytorch", help="synchronize bn")
@@ -128,6 +127,7 @@ parser.add_argument("--syncbn_process_group_size", type=int, default=8, help="""
 parser.add_argument("--dump_path", type=str, default=".",
                     help="experiment dump path for checkpoints and log")
 parser.add_argument("--seed", type=int, default=31, help="seed")
+
 
 def main():
     global args
@@ -148,7 +148,6 @@ def main():
     )
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     
-    # DataLoader自动调用train_dataset[i]
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         sampler=sampler,
@@ -169,14 +168,7 @@ def main():
     # synchronize batch norm layers
     if args.sync_bn == "pytorch":
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    #涉及apex需要替换
     elif args.sync_bn == "apex":
-        '''
-        # with apex syncbn we sync bn per group because it speeds up computation
-        # compared to global syncbn
-        process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
-        model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
-        '''
         raise ValueError("Apex SyncBN is not available. Please use --sync_bn pytorch or none.")
     # copy model to GPU
     model = model.cuda()
@@ -184,13 +176,18 @@ def main():
         logger.info(model)
     logger.info("Building model done.")
 
+    # FP32
+    if model.prototypes is not None:
+        model.prototypes = model.prototypes.to(dtype=torch.float32)
+
+    # build optimizer
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=args.base_lr,
         momentum=0.9,
         weight_decay=args.wd,
     )
-    optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
+    optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=True)
     warmup_lr_schedule = np.linspace(args.start_warmup, args.base_lr, len(train_loader) * args.warmup_epochs)
     iters = np.arange(len(train_loader) * (args.epochs - args.warmup_epochs))
     cosine_lr_schedule = np.array([args.final_lr + 0.5 * (args.base_lr - args.final_lr) * (1 + \
@@ -198,13 +195,7 @@ def main():
     lr_schedule = np.concatenate((warmup_lr_schedule, cosine_lr_schedule))
     logger.info("Building optimizer done.")
 
-    # init mixed precision
-    '''
-    if args.use_fp16:
-        model, optimizer = apex.amp.initialize(model, optimizer, opt_level="O1")
-        logger.info("Initializing mixed precision done.")
-    '''
-    # (torch.cuda.amp)
+    # init mixed precision (torch.cuda.amp)
     scaler = GradScaler(enabled=args.use_fp16)
     if args.use_fp16:
         logger.info("Initializing mixed precision with torch.cuda.amp done.")
@@ -290,7 +281,6 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
 
     end = time.time()
     for it, inputs in enumerate(train_loader):
-
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -319,10 +309,8 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                     )
                     raise RuntimeError("Non-finite prototypes weights, stopping training")
 
-                # 外部已经强制prototypes成为fp32，就不需要.float()
-                # w = F.normalize(w0.float(), dim=1, p=2)
                 w = F.normalize(w0, dim=1, p=2).detach()          # normalize in fp32
-                model.module.prototypes.weight.copy_(w)  # keep original dtype
+                model.module.prototypes.weight.copy_(w)           # keep original dtype
 
 
         # ---- debug: prototype dtype (only once) ----
@@ -336,7 +324,6 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
         inputs = [x.cuda(non_blocking=True) for x in inputs]
         # ============ multi-res forward passes (autocast for memory/speed) ... ============
         with autocast(enabled=args.use_fp16):
-            with autocast(enabled=args.use_fp16):
             # Forward pass: obtain embeddings and prototype logits
             embedding, output = model(inputs)
 
@@ -351,7 +338,6 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
             # If NaN or Inf appears in the model outputs (prototype logits),
             # the training is already numerically unstable and must be stopped
             # immediately to avoid log explosion and corrupted checkpoints.
-            # ---- Numerical stability check (model output) ----
             if not torch.isfinite(output).all():
                 lr = optimizer.param_groups[0]["lr"]
                 n_nan = torch.isnan(output).sum().item()
@@ -377,7 +363,8 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                     )
 
                 raise RuntimeError("Non-finite output, stopping training")
-                
+            # ---- Numerical stability check ----
+
             # Detach embeddings to avoid backpropagation through the assignment path
             embedding = embedding.detach()
 
@@ -389,6 +376,7 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                 if args.rank == 0:
                     logger.error(f"Non-finite embedding at epoch={epoch}, it={it}")
                 raise RuntimeError("Non-finite embedding, stopping training")
+            # ---- Numerical stability check ----
 
             # Batch size for one crop (used in SwAV loss computation)
             bs = inputs[0].size(0)
@@ -424,7 +412,6 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                 logp = F.log_softmax(x, dim=1)
                 subloss -= torch.mean(torch.sum(q * logp, dim=1))
             loss += subloss / (np.sum(args.nmb_crops) - 1)
-
         loss /= len(args.crops_for_assign)
 
         # --- stop early on NaN/Inf to avoid huge logs / wasted GPU time ---
@@ -437,19 +424,10 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
         # ============ backward and optim step ... ============
         optimizer.zero_grad()
         if args.use_fp16:
-            # 先缩放 loss，反向传播
             scaler.scale(loss).backward()
-            # 反缩放梯度，之后才可以安全地手动修改 p.grad
             scaler.unscale_(optimizer)           
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    
-            # 冻结 prototypes 的梯度
-            '''
-            if iteration < args.freeze_prototypes_niters:
-                for name, p in model.named_parameters():
-                    if "prototypes" in name and p.grad is not None:
-                        p.grad = None
-            '''
+
             # cancel gradients for prototypes during the freeze period (same behavior as original SwAV)
             if iteration < args.freeze_prototypes_niters and model.module.prototypes is not None:
                 for p in model.module.prototypes.parameters():
@@ -460,7 +438,6 @@ def train(train_loader, model, optimizer, scaler, epoch, lr_schedule, queue):
                         )
                     p.grad = None
 
-            # 再做一步带缩放的 step + update 缩放因子
             scaler.step(optimizer)
             scaler.update()
         
@@ -525,8 +502,9 @@ def distributed_sinkhorn(out):
         Q /= (sum_of_cols + 1e-12)
         Q /= B
 
-    Q *= B
+    Q *= B # the colomns must sum to 1 so that Q is an assignment
     return Q.t()
+
 
 if __name__ == "__main__":
     main()

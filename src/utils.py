@@ -9,7 +9,7 @@ import argparse
 from logging import getLogger
 import pickle
 import os
-# 正则安全解析SLURM_TASKS_PER_NODE
+
 import re
 
 import numpy as np
@@ -22,9 +22,7 @@ import torch.distributed as dist
 FALSY_STRINGS = {"off", "false", "0"}
 TRUTHY_STRINGS = {"on", "true", "1"}
 
-
 logger = getLogger()
-
 
 def bool_flag(s):
     """
@@ -37,61 +35,6 @@ def bool_flag(s):
     else:
         raise argparse.ArgumentTypeError("invalid value for a boolean flag")
 
-'''
-def init_distributed_mode(args):
-    """
-    Initialize the following variables:
-        - world_size
-        - rank
-    """
-
-    # HPC超算最常见的任务调度系统
-    args.is_slurm_job = "SLURM_JOB_ID" in os.environ
-
-    if args.is_slurm_job:
-        # SLURM分配的全局进程ID
-        args.rank = int(os.environ["SLURM_PROCID"])
-        # 集群使用了多少节点，每个节点多少任务
-        args.world_size = int(os.environ["SLURM_NTASKS"])
-        """
-        这里网端没改动
-        args.world_size = int(os.environ["SLURM_NNODES"]) * int(
-            os.environ["SLURM_TASKS_PER_NODE"][0]
-        )"""
-    else:
-        # multi-GPU job (local or multi-node) - jobs started with torch.distributed.launch
-        # read environment variables
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ["WORLD_SIZE"])
-
-    # prepare distributed
-    dist.init_process_group(
-        backend="nccl", #NVIDIA GPU 最快的通信后端
-        init_method=args.dist_url, #进程同步方式
-        world_size=args.world_size,
-        rank=args.rank,
-    )
-
-    """
-    # set cuda device
-    这里网端没改动
-    args.gpu_to_work_on = args.rank % torch.cuda.device_count()
-    torch.cuda.set_device(args.gpu_to_work_on)
-    """
-    
-    # set cuda device
-    if args.is_slurm_job and "SLURM_LOCALID" in os.environ:
-        args.gpu_to_work_on = int(os.environ["SLURM_LOCALID"])
-    elif "LOCAL_RANK" in os.environ:
-        args.gpu_to_work_on = int(os.environ["LOCAL_RANK"])
-    else:
-        args.gpu_to_work_on = args.rank % torch.cuda.device_count()
-
-    torch.cuda.set_device(args.gpu_to_work_on)
-    
-    return
-'''
-
 def init_distributed_mode(args):
     """
     Initialize:
@@ -102,7 +45,6 @@ def init_distributed_mode(args):
 
     args.is_slurm_job = "SLURM_JOB_ID" in os.environ
 
-    # 优先使用 torchrun 的环境变量（即使在 Slurm job 里也优先）
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
@@ -111,16 +53,13 @@ def init_distributed_mode(args):
     elif args.is_slurm_job:
         args.rank = int(os.environ["SLURM_PROCID"])
 
-        # 优先用 SLURM_NTASKS（最可靠）
         if "SLURM_NTASKS" in os.environ:
             args.world_size = int(os.environ["SLURM_NTASKS"])
         else:
-            # fallback: NNODES * TASKS_PER_NODE（处理 "4(x2)" 这种格式）
             tasks_per_node_str = os.environ.get("SLURM_TASKS_PER_NODE", "1")
             tasks_per_node = int(re.match(r"\d+", tasks_per_node_str).group())
             args.world_size = int(os.environ.get("SLURM_NNODES", "1")) * tasks_per_node
 
-        # 优先用 SLURM_LOCALID 作为本节点 local rank
         local_rank = int(os.environ.get("SLURM_LOCALID", 0))
 
     else:
@@ -138,7 +77,6 @@ def init_distributed_mode(args):
             rank=args.rank,
         )
 
-    # 用 local_rank 选 GPU（比 rank % device_count 更对）
     if torch.cuda.is_available():
         ngpu = torch.cuda.device_count()
         args.gpu_to_work_on = local_rank % max(1, ngpu)
@@ -146,7 +84,6 @@ def init_distributed_mode(args):
     else:
         args.gpu_to_work_on = -1
 
-    
 def initialize_exp(params, *args, dump_params=True):
     """
     Initialize the experience:
@@ -176,16 +113,12 @@ def initialize_exp(params, *args, dump_params=True):
     )
     logger.info("============ Initialized logger ============")
     logger.info(f"[dist-ok] rank={params.rank} world_size={params.world_size} gpu={params.gpu_to_work_on}")
-    #----------------------只让 rank0 打印完整参数------------------
-    #logger.info(
-    #    "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(params)).items()))
-    #)
+
     if params.rank == 0:
         logger.info(
             "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(vars(params).items()))
         )
-    #----------------------------------------------------------
-    
+
     logger.info("The experiment will be stored in %s\n" % params.dump_path)
     logger.info("")
     return logger, training_stats
@@ -198,7 +131,7 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
     # look for a checkpoint in exp repository
     if isinstance(ckp_paths, list):
         for ckp_path in ckp_paths:
-            if os.path.isfile(ckp_path): #找到第一个存在的路径
+            if os.path.isfile(ckp_path):
                 break
     else:
         ckp_path = ckp_paths
@@ -208,22 +141,24 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
 
     logger.info("Found checkpoint at {}".format(ckp_path))
 
-    # open checkpoint file
-    checkpoint = torch.load(
-        ckp_path, map_location="cuda:" + str(torch.distributed.get_rank() % torch.cuda.device_count())
-    )
+    #============================== safe map_location for both DDP and single-process runs=======================
+    if torch.cuda.is_available():
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            gpu_id = torch.distributed.get_rank() % torch.cuda.device_count()
+        else:
+            gpu_id = 0
+        map_loc = "cuda:" + str(gpu_id)
+    else:
+        map_loc = "cpu"
 
-    # key is what to look for in the checkpoint file
-    # value is the object to load
-    # example: {'state_dict': model}
+    checkpoint = torch.load(ckp_path, map_location=map_loc)
+
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:
             try:
-                # strict表示checkpoint的key和model的key必须完全匹配
                 msg = value.load_state_dict(checkpoint[key], strict=False)
                 print(msg)
             except TypeError:
-                # 例如prototype可能数据不一致；初始epochs不一定启用了queue...
                 msg = value.load_state_dict(checkpoint[key])
             logger.info("=> loaded {} from checkpoint '{}'".format(key, ckp_path))
         else:
@@ -232,7 +167,6 @@ def restart_from_checkpoint(ckp_paths, run_variables=None, **kwargs):
             )
 
     # reload variable important for the run
-    # 恢复非模型参数变量，比如当前epoch,iteration等
     if run_variables is not None:
         for var_name in run_variables:
             if var_name in checkpoint:
@@ -269,19 +203,17 @@ class AverageMeter(object):
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad(): #禁用梯度
-        # maxk = max(topk)， test30只有3类
+    with torch.no_grad():
         maxk = min(max(topk), output.size(1))
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t() #转置，方便比较
-        correct = pred.eq(target.view(1, -1).expand_as(pred)) #1或0表明预测是否正确
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
 
         res = []
         for k in topk:
             k_eff = min(k, maxk)
-            # 拉平得到前top k的正确率，因为每个分类都只会有一个所以可以直接求和
             correct_k = correct[:k_eff].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
