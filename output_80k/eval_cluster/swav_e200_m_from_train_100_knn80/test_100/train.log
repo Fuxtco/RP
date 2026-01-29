@@ -1,0 +1,62 @@
+INFO - 01/26/26 19:14:24 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 19:14:24 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 19:14:24 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 30
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: ilp
+                                     split: test_100
+                                     two_row_cols: 20
+                                     two_row_gap: 12
+                                     two_row_img_size: 48
+                                     two_row_pad: 2
+                                     unlabeled: False
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 19:14:24 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100
+                                     
+
+INFO - 01/26/26 19:14:24 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 19:14:24 - 0:00:00 - [data] total images = 100
+INFO - 01/26/26 19:14:24 - 0:00:00 - Load msg: <All keys matched successfully>
+INFO - 01/26/26 19:14:26 - 0:00:02 - [feat_dim128] std_mean=0.084521 std_min=0.041912 std_max=0.119702
+INFO - 01/26/26 19:14:26 - 0:00:02 - [feat_dim128] cos(offdiag) min=-0.557748 p1=-0.377930 p50=-0.027962 p99=0.991490 max=1.000000
+INFO - 01/26/26 19:14:26 - 0:00:02 - [embed] feats shape = (100, 128)
+INFO - 01/26/26 19:14:26 - 0:00:02 - [sim] cosine: min=-0.5577 p1=-0.3779 p50=-0.0280 p99=0.9915 max=1.0000
+INFO - 01/26/26 19:14:26 - 0:00:02 - [save] cosine hist: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/cosine_hist_test_100.png
+INFO - 01/26/26 19:22:10 - 0:07:46 - [cluster/cosine+ilp] m=0.4600 num_clusters=11 ACC=0.9806060606060606 RI=0.9913131313131314 VI=0.1333194347454869
+INFO - 01/26/26 19:22:10 - 0:07:46 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/clusters_test_100.csv
+INFO - 01/26/26 19:22:10 - 0:07:46 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/metrics_test_100.json
+INFO - 01/26/26 19:22:10 - 0:07:46 - [metrics] {'pipeline': 'cosine', 'solver': 'ilp', 'N': 100, 'knn': 30, 'num_clusters': 11, 'ACC': 0.9806060606060606, 'PC': 0.9884649511978703, 'RC': 0.990222222222222, 'PJ': 0.9004524886877807, 'RJ': 0.8844444444444425, 'F1C': 0.9893428063938158, 'F1J': 0.8923766816138478, 'RI': 0.9913131313131314, 'VI': 0.1333194347454869, 'm': 0.45999999999999996, 'purity': 0.99, 'nmi': 0.9714609226002937, 'ari': 0.9462072102809053}
+INFO - 01/26/26 19:22:11 - 0:07:47 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/montages_test_100
+INFO - 01/26/26 19:22:11 - 0:07:48 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/two_row_test_100.png

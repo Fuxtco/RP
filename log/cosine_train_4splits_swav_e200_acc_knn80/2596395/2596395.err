@@ -1,0 +1,329 @@
+INFO - 01/26/26 19:11:14 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 19:11:14 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 19:11:14 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 30
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.55
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: True
+                                     save_montage: False
+                                     save_two_row: False
+                                     seed: 0
+                                     select_m_on_train: True
+                                     solver: ilp
+                                     split: train_100
+                                     two_row_cols: 20
+                                     two_row_gap: 12
+                                     two_row_img_size: 64
+                                     two_row_pad: 2
+                                     unlabeled: False
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 19:11:14 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100
+                                     
+
+INFO - 01/26/26 19:11:14 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 19:11:14 - 0:00:00 - [data] total images = 100
+eval_cor_cluster.py:1012: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state = torch.load(args.ckpt, map_location=device)
+INFO - 01/26/26 19:11:20 - 0:00:06 - Load msg: <All keys matched successfully>
+/home/h4/xufu518g/SwAV/swav/src/resnet50.py:327: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO - 01/26/26 19:11:26 - 0:00:11 - [feat_dim128] std_mean=0.084412 std_min=0.045123 std_max=0.124471
+INFO - 01/26/26 19:11:26 - 0:00:11 - [feat_dim128] cos(offdiag) min=-0.524054 p1=-0.364198 p50=-0.026830 p99=0.984350 max=0.999965
+INFO - 01/26/26 19:11:26 - 0:00:11 - [embed] feats shape = (100, 128)
+INFO - 01/26/26 19:11:26 - 0:00:11 - [sim] cosine: min=-0.5241 p1=-0.3639 p50=-0.0268 p99=0.9841 max=1.0000
+INFO - 01/26/26 19:11:26 - 0:00:12 - [save] cosine hist: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/cosine_hist_train_100.png
+INFO - 01/26/26 19:11:26 - 0:00:12 - [m] selected m=0.4600 by ACC (best=0.9796)
+INFO - 01/26/26 19:11:26 - 0:00:12 - [save] m sweep csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/m_sweep_train_100.csv
+INFO - 01/26/26 19:11:26 - 0:00:12 - [save] m sweep plot: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/m_sweep_train_100_ACC.png
+INFO - 01/26/26 19:14:16 - 0:03:02 - [cluster/cosine+ilp] m=0.4600 num_clusters=12 ACC=0.9795959595959596 RI=0.9911111111111112 VI=0.14819425634148242
+INFO - 01/26/26 19:14:16 - 0:03:02 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/clusters_train_100.csv
+INFO - 01/26/26 19:14:16 - 0:03:02 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/train_100/metrics_train_100.json
+INFO - 01/26/26 19:14:16 - 0:03:02 - [metrics] {'pipeline': 'cosine', 'solver': 'ilp', 'N': 100, 'knn': 30, 'num_clusters': 12, 'ACC': 0.9795959595959596, 'PC': 0.986722726266873, 'RC': 0.9908888888888887, 'PJ': 0.9048723897911811, 'RJ': 0.8666666666666647, 'F1C': 0.9888014192255781, 'F1J': 0.8853575482401338, 'RI': 0.9911111111111112, 'VI': 0.14819425634148242, 'm': 0.45999999999999996, 'purity': 0.99, 'nmi': 0.9686403742865186, 'ari': 0.9438645325910462}
+INFO - 01/26/26 19:14:24 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 19:14:24 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 19:14:24 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 30
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: ilp
+                                     split: test_100
+                                     two_row_cols: 20
+                                     two_row_gap: 12
+                                     two_row_img_size: 48
+                                     two_row_pad: 2
+                                     unlabeled: False
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 19:14:24 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100
+                                     
+
+INFO - 01/26/26 19:14:24 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 19:14:24 - 0:00:00 - [data] total images = 100
+eval_cor_cluster.py:1012: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state = torch.load(args.ckpt, map_location=device)
+INFO - 01/26/26 19:14:24 - 0:00:00 - Load msg: <All keys matched successfully>
+/home/h4/xufu518g/SwAV/swav/src/resnet50.py:327: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO - 01/26/26 19:14:26 - 0:00:02 - [feat_dim128] std_mean=0.084521 std_min=0.041912 std_max=0.119702
+INFO - 01/26/26 19:14:26 - 0:00:02 - [feat_dim128] cos(offdiag) min=-0.557748 p1=-0.377930 p50=-0.027962 p99=0.991490 max=1.000000
+INFO - 01/26/26 19:14:26 - 0:00:02 - [embed] feats shape = (100, 128)
+INFO - 01/26/26 19:14:26 - 0:00:02 - [sim] cosine: min=-0.5577 p1=-0.3779 p50=-0.0280 p99=0.9915 max=1.0000
+INFO - 01/26/26 19:14:26 - 0:00:02 - [save] cosine hist: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/cosine_hist_test_100.png
+INFO - 01/26/26 19:22:10 - 0:07:46 - [cluster/cosine+ilp] m=0.4600 num_clusters=11 ACC=0.9806060606060606 RI=0.9913131313131314 VI=0.1333194347454869
+INFO - 01/26/26 19:22:10 - 0:07:46 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/clusters_test_100.csv
+INFO - 01/26/26 19:22:10 - 0:07:46 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/metrics_test_100.json
+INFO - 01/26/26 19:22:10 - 0:07:46 - [metrics] {'pipeline': 'cosine', 'solver': 'ilp', 'N': 100, 'knn': 30, 'num_clusters': 11, 'ACC': 0.9806060606060606, 'PC': 0.9884649511978703, 'RC': 0.990222222222222, 'PJ': 0.9004524886877807, 'RJ': 0.8844444444444425, 'F1C': 0.9893428063938158, 'F1J': 0.8923766816138478, 'RI': 0.9913131313131314, 'VI': 0.1333194347454869, 'm': 0.45999999999999996, 'purity': 0.99, 'nmi': 0.9714609226002937, 'ari': 0.9462072102809053}
+INFO - 01/26/26 19:22:11 - 0:07:47 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/montages_test_100
+INFO - 01/26/26 19:22:11 - 0:07:48 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_100/two_row_test_100.png
+INFO - 01/26/26 19:22:17 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 19:22:17 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 19:22:17 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 30
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: ilp
+                                     split: test_30
+                                     two_row_cols: 6
+                                     two_row_gap: 12
+                                     two_row_img_size: 48
+                                     two_row_pad: 2
+                                     unlabeled: False
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 19:22:17 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30
+                                     
+
+INFO - 01/26/26 19:22:17 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 19:22:17 - 0:00:00 - [data] total images = 30
+eval_cor_cluster.py:1012: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state = torch.load(args.ckpt, map_location=device)
+INFO - 01/26/26 19:22:17 - 0:00:00 - Load msg: <All keys matched successfully>
+/home/h4/xufu518g/SwAV/swav/src/resnet50.py:327: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO - 01/26/26 19:22:18 - 0:00:02 - [feat_dim128] std_mean=0.065433 std_min=0.022147 std_max=0.152221
+INFO - 01/26/26 19:22:18 - 0:00:02 - [feat_dim128] cos(offdiag) min=-0.152018 p1=-0.136812 p50=0.240489 p99=0.997287 max=0.999237
+INFO - 01/26/26 19:22:18 - 0:00:02 - [embed] feats shape = (30, 128)
+INFO - 01/26/26 19:22:18 - 0:00:02 - [sim] cosine: min=-0.1520 p1=-0.1343 p50=0.2405 p99=0.9973 max=0.9992
+INFO - 01/26/26 19:22:19 - 0:00:02 - [save] cosine hist: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/cosine_hist_test_30.png
+INFO - 01/26/26 19:22:19 - 0:00:02 - [cluster/cosine+ilp] m=0.4600 num_clusters=4 ACC=0.960919540229885 RI=0.9241379310344827 VI=0.3798114277264546
+INFO - 01/26/26 19:22:19 - 0:00:02 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/clusters_test_30.csv
+INFO - 01/26/26 19:22:19 - 0:00:02 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/metrics_test_30.json
+INFO - 01/26/26 19:22:19 - 0:00:02 - [metrics] {'pipeline': 'cosine', 'solver': 'ilp', 'N': 30, 'knn': 30, 'num_clusters': 4, 'ACC': 0.960919540229885, 'PC': 0.9700996677740831, 'RC': 0.97333333333333, 'PJ': 0.9402985074626796, 'RJ': 0.9333333333333265, 'F1C': 0.9717138103156365, 'F1J': 0.9368029739771881, 'RI': 0.9241379310344827, 'VI': 0.3798114277264546, 'm': 0.45999999999999996, 'purity': 0.9666666666666667, 'nmi': 0.8395888275498188, 'ari': 0.8164204872434299}
+INFO - 01/26/26 19:22:19 - 0:00:03 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/montages_test_30
+INFO - 01/26/26 19:22:20 - 0:00:03 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_30/two_row_test_30.png
+INFO - 01/26/26 19:22:24 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 19:22:24 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 19:22:24 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 30
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: ilp
+                                     split: test_130
+                                     two_row_cols: 26
+                                     two_row_gap: 12
+                                     two_row_img_size: 48
+                                     two_row_pad: 2
+                                     unlabeled: False
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 19:22:24 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130
+                                     
+
+INFO - 01/26/26 19:22:24 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 19:22:24 - 0:00:00 - [data] total images = 130
+eval_cor_cluster.py:1012: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state = torch.load(args.ckpt, map_location=device)
+INFO - 01/26/26 19:22:24 - 0:00:00 - Load msg: <All keys matched successfully>
+/home/h4/xufu518g/SwAV/swav/src/resnet50.py:327: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO - 01/26/26 19:22:27 - 0:00:03 - [feat_dim128] std_mean=0.084767 std_min=0.051898 std_max=0.122475
+INFO - 01/26/26 19:22:27 - 0:00:03 - [feat_dim128] cos(offdiag) min=-0.557748 p1=-0.336871 p50=-0.025277 p99=0.989105 max=1.000000
+INFO - 01/26/26 19:22:27 - 0:00:03 - [embed] feats shape = (130, 128)
+INFO - 01/26/26 19:22:27 - 0:00:03 - [sim] cosine: min=-0.5577 p1=-0.3368 p50=-0.0253 p99=0.9891 max=1.0000
+INFO - 01/26/26 19:22:27 - 0:00:03 - [save] cosine hist: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/cosine_hist_test_130.png
+INFO - 01/26/26 20:00:24 - 0:38:00 - [cluster/cosine+ilp] m=0.4600 num_clusters=16 ACC=0.9731663685152058 RI=0.977221228384019 VI=0.3941297927839891
+INFO - 01/26/26 20:00:24 - 0:38:00 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/clusters_test_130.csv
+INFO - 01/26/26 20:00:24 - 0:38:00 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/metrics_test_130.json
+INFO - 01/26/26 20:00:24 - 0:38:00 - [metrics] {'pipeline': 'cosine', 'solver': 'ilp', 'N': 130, 'knn': 30, 'num_clusters': 16, 'ACC': 0.9731663685152058, 'PC': 0.9920748343510457, 'RC': 0.9789743589743588, 'PJ': 0.7616279069767431, 'RJ': 0.8957264957264942, 'F1C': 0.9854810608499871, 'F1J': 0.8232521602508767, 'RI': 0.977221228384019, 'VI': 0.3941297927839891, 'm': 0.45999999999999996, 'purity': 0.9153846153846154, 'nmi': 0.9241084667387217, 'ari': 0.8254744044709832}
+INFO - 01/26/26 20:00:26 - 0:38:02 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/montages_test_130
+INFO - 01/26/26 20:00:26 - 0:38:02 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/test_130/two_row_test_130.png
+INFO - 01/26/26 20:00:33 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 20:00:33 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 20:00:33 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 80
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: pivot
+                                     split: Unlabeled
+                                     two_row_cols: 50
+                                     two_row_gap: 12
+                                     two_row_img_size: 24
+                                     two_row_pad: 2
+                                     unlabeled: True
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 20:00:33 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled
+                                     
+
+INFO - 01/26/26 20:00:33 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 20:00:33 - 0:00:00 - [data] total images = 1000
+eval_cor_cluster.py:1012: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state = torch.load(args.ckpt, map_location=device)
+INFO - 01/26/26 20:00:33 - 0:00:00 - Load msg: <All keys matched successfully>
+/home/h4/xufu518g/SwAV/swav/src/resnet50.py:327: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO - 01/26/26 20:00:42 - 0:00:09 - [feat_dim128] std_mean=0.085988 std_min=0.063100 std_max=0.119624
+INFO - 01/26/26 20:00:42 - 0:00:09 - [feat_dim128] cos(offdiag) min=-0.654590 p1=-0.258644 p50=-0.029983 p99=0.886284 max=0.999079
+INFO - 01/26/26 20:00:42 - 0:00:09 - [embed] feats shape = (1000, 128)
+INFO - 01/26/26 20:00:42 - 0:00:10 - [cluster/cosine+pivot] m=0.4600 num_clusters=35 
+INFO - 01/26/26 20:00:42 - 0:00:10 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/clusters_Unlabeled.csv
+INFO - 01/26/26 20:00:42 - 0:00:10 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/metrics_Unlabeled.json
+INFO - 01/26/26 20:00:42 - 0:00:10 - [metrics] {'pipeline': 'cosine', 'solver': 'pivot', 'N': 1000, 'knn': 80, 'num_clusters': 35, 'ACC': None, 'PC': None, 'RC': None, 'PJ': None, 'RJ': None, 'F1C': None, 'F1J': None, 'RI': None, 'VI': None, 'm': 0.45999999999999996, 'purity': None, 'nmi': None, 'ari': None}
+INFO - 01/26/26 20:00:48 - 0:00:15 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/montages_Unlabeled
+INFO - 01/26/26 20:00:53 - 0:00:21 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/two_row_Unlabeled.png

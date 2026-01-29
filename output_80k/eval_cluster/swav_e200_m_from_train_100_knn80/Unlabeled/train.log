@@ -1,0 +1,60 @@
+INFO - 01/26/26 20:00:33 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/26/26 20:00:33 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/26/26 20:00:33 - 0:00:00 - arch: resnet50
+                                     batch_size: 64
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/checkpoints
+                                     dump_path: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     hidden_mlp: 2048
+                                     ilp_backend: pulp
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     knn: 80
+                                     local_rank: 0
+                                     logit_thresh: 0.0
+                                     m: 0.45999999999999996
+                                     m_max: 0.9
+                                     m_min: 0.1
+                                     m_select_metric: ACC
+                                     m_steps: 81
+                                     montage_cols: 5
+                                     montage_max: 25
+                                     nmb_prototypes: 100
+                                     pair_head_path: 
+                                     pipeline: cosine
+                                     rank: 0
+                                     save_m_sweep: False
+                                     save_montage: True
+                                     save_two_row: True
+                                     seed: 0
+                                     select_m_on_train: False
+                                     solver: pivot
+                                     split: Unlabeled
+                                     two_row_cols: 50
+                                     two_row_gap: 12
+                                     two_row_img_size: 24
+                                     two_row_pad: 2
+                                     unlabeled: True
+                                     use_proj: True
+                                     workers: 4
+                                     world_size: 1
+INFO - 01/26/26 20:00:33 - 0:00:00 - The experiment will be stored in ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled
+                                     
+
+INFO - 01/26/26 20:00:33 - 0:00:00 - [device] cuda:0
+INFO - 01/26/26 20:00:33 - 0:00:00 - [data] total images = 1000
+INFO - 01/26/26 20:00:33 - 0:00:00 - Load msg: <All keys matched successfully>
+INFO - 01/26/26 20:00:42 - 0:00:09 - [feat_dim128] std_mean=0.085988 std_min=0.063100 std_max=0.119624
+INFO - 01/26/26 20:00:42 - 0:00:09 - [feat_dim128] cos(offdiag) min=-0.654590 p1=-0.258644 p50=-0.029983 p99=0.886284 max=0.999079
+INFO - 01/26/26 20:00:42 - 0:00:09 - [embed] feats shape = (1000, 128)
+INFO - 01/26/26 20:00:42 - 0:00:10 - [cluster/cosine+pivot] m=0.4600 num_clusters=35 
+INFO - 01/26/26 20:00:42 - 0:00:10 - [save] clusters csv: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/clusters_Unlabeled.csv
+INFO - 01/26/26 20:00:42 - 0:00:10 - [save] metrics json: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/metrics_Unlabeled.json
+INFO - 01/26/26 20:00:42 - 0:00:10 - [metrics] {'pipeline': 'cosine', 'solver': 'pivot', 'N': 1000, 'knn': 80, 'num_clusters': 35, 'ACC': None, 'PC': None, 'RC': None, 'PJ': None, 'RJ': None, 'F1C': None, 'F1J': None, 'RI': None, 'VI': None, 'm': 0.45999999999999996, 'purity': None, 'nmi': None, 'ari': None}
+INFO - 01/26/26 20:00:48 - 0:00:15 - [save] montages: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/montages_Unlabeled
+INFO - 01/26/26 20:00:53 - 0:00:21 - [save] two-row figure: ./eval_cluster/final/swav_e200_m_from_train_100_knn80/Unlabeled/two_row_Unlabeled.png

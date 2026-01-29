@@ -1,0 +1,31 @@
+INFO - 01/18/26 00:37:32 - 0:00:00 - ============ Initialized logger ============
+INFO - 01/18/26 00:37:32 - 0:00:00 - [dist-ok] rank=0 world_size=1 gpu=0
+INFO - 01/18/26 00:37:32 - 0:00:00 - arch: resnet50
+                                     batch_size: 256
+                                     ckpt: /home/xufu518g/SwAV/swav/output_80k/ddp4/adjust_mean_std_only/checkpoint.pth.tar
+                                     data_path: /home/xufu518g/SwAV/swav/datasets/down
+                                     dist_url: env://
+                                     dump_checkpoints: ./eval_pairwise/final/train100_absdiff/test_100/checkpoints
+                                     dump_path: ./eval_pairwise/final/train100_absdiff/test_100
+                                     feat_dim: 128
+                                     fusion: absdiff
+                                     gpu_to_work_on: 0
+                                     head_path: ./eval_pairwise/final/train100_absdiff/pair_head.pth.tar
+                                     hidden_mlp: 2048
+                                     img_size: 224
+                                     is_slurm_job: True
+                                     local_rank: 0
+                                     nmb_prototypes: 100
+                                     rank: 0
+                                     seed: 31
+                                     split: test_100
+                                     use_bn: False
+                                     workers: 8
+                                     world_size: 1
+INFO - 01/18/26 00:37:32 - 0:00:00 - The experiment will be stored in ./eval_pairwise/final/train100_absdiff/test_100
+                                     
+
+INFO - 01/18/26 00:37:32 - 0:00:00 - [data] split=test_100 base N=100 pairs=4950
+INFO - 01/18/26 00:37:32 - 0:00:00 - [ckpt] swav load msg: <All keys matched successfully>
+INFO - 01/18/26 00:37:42 - 0:00:11 - [metrics] {'split': 'test_100', 'N': 100, 'pairs': 4950, 'fusion': 'absdiff', 'loss': 0.08521194507377317, 'ACC': 0.9721212125547004, 'F1J': 0.8414438544933215, 'F1C': 0.9832587696069176}
+INFO - 01/18/26 00:37:42 - 0:00:11 - [save] ./eval_pairwise/final/train100_absdiff/test_100/metrics_test_100.json

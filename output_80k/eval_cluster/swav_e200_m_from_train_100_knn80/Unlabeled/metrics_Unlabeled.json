@@ -1,0 +1,20 @@
+{
+  "pipeline": "cosine",
+  "solver": "pivot",
+  "N": 1000,
+  "knn": 80,
+  "num_clusters": 35,
+  "ACC": null,
+  "PC": null,
+  "RC": null,
+  "PJ": null,
+  "RJ": null,
+  "F1C": null,
+  "F1J": null,
+  "RI": null,
+  "VI": null,
+  "m": 0.45999999999999996,
+  "purity": null,
+  "nmi": null,
+  "ari": null
+}

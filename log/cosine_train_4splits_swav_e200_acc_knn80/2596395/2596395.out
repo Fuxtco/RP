@@ -1,0 +1,5 @@
+Job started on Mon Jan 26 07:10:58 PM CET 2026
+Running on node: c62
+CUDA visible devices: 0
+[INFO] Selected m on train_100: 0.45999999999999996
+Job finished on Mon Jan 26 08:00:54 PM CET 2026
